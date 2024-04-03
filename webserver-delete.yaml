@@ -1,0 +1,9 @@
+# webserver-delete.yaml
+---
+- name: Delete Apache Webserver
+  hosts: webservers
+  tasks:
+    - name: HTTPD is deleted.
+      yum:
+        name: httpd
+        state: absent

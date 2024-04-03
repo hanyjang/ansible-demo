@@ -1,0 +1,14 @@
+# multiplay.yaml
+---
+- hosts: webservers
+  tasks:
+  - name: Enable SELinux in permissive  mode
+    ansible.posix.selinux:
+      policy: targeted
+      state: permissive
+
+  - command: swapoff -a
+    mount:
+      name: none
+      fstype: swap
+      state: absent

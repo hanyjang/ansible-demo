@@ -1,18 +1,154 @@
 # multiplay.yaml
 ---
 - hosts: webservers
+  become: yes
   tasks:
-  - name: Enable SELinux in permissive  mode
-    ansible.posix.selinux:
-      policy: targeted
-      state: permissive
-  - name: Disable swap for current session
-    command: swapoff -a
-    become: true
+    - name: selinux config
+      selinux:
+        policy: targeted
+        state: permissive
+    
+    - name: stop firewalld
+      service:
+        name: firewalld
+        state: stopped
+        enabled: false
 
-  - name: Disable swap permanently, persist reboots
-    replace:
-      path: /etc/fstab
-      regexp: '^(\s*)([^#\n]+\s+)(\w+\s+)swap(\s+.*)$'
-      replace: '#\1\2\3swap\4'
-      backup: yes
+    - name: swap off on runtime
+      shell: swapoff -a
+      when: ansible_swaptotal_mb > 0
+
+    - name: swap off on fstab
+      mount:
+        name: none
+        fstype: swap
+        state: absent
+
+    - name: Load overlay kernel module
+      ansible.builtin.modprobe:
+        name: overlay
+        state: present
+
+    - name: Load br_netfilter kernel module
+      ansible.builtin.modprobe:
+        name: br_netfilter
+        state: present
+
+    - name: Ensure overlay module is persisted
+      ansible.builtin.lineinfile:
+        path: /etc/modules-load.d/overlay.conf
+        line: overlay
+        create: yes
+
+    - name: Ensure br_netfilter module is persisted
+      ansible.builtin.lineinfile:
+        path: /etc/modules-load.d/br_netfilter.conf
+        line: br_netfilter
+        create: yes
+
+    - name: Enable IP forwarding
+      ansible.builtin.sysctl:
+        name: net.ipv4.ip_forward
+        value: '1'
+        state: present
+        reload: yes   
+
+    - ansible.posix.sysctl:
+        name: net.ipv4.ip_forward
+        value: '1'
+        sysctl_set: true
+
+    - ansible.posix.sysctl:
+        name: net.bridge.bridge-nf-call-ip6tables
+        value: '1'
+        sysctl_set: true
+
+    - ansible.posix.sysctl:
+        name: net.bridge.bridge-nf-call-iptables
+        value: '1'
+        sysctl_set: true
+
+    - name: Download docker-ce repository
+      ansible.builtin.get_url:
+        url: http://download.docker.com/linux/centos/docker-ce.repo
+        dest: /etc/yum.repos.d/
+        force_basic_auth: yes
+
+    - name: Set up Kubernetes repository
+      ansible.builtin.yum_repository:
+        name: kubernetes
+        description: Kubernetes Repository
+        baseurl: https://pkgs.k8s.io/core:/stable:/v1.29/rpm/
+        gpgcheck: yes
+        gpgkey:
+          - https://pkgs.k8s.io/core:/stable:/v1.29/rpm/repodata/repomd.xml.key
+
+    - name: Install Kubernetes (kubeadm, kubelet, kubectl)
+      ansible.builtin.yum:
+        name: 
+          - kubeadm
+          - kubelet
+          - kubectl
+          - containerd
+        state: present
+
+    - name: Containerd configuration
+      ansible.builtin.command:
+        cmd: containerd config default > /etc/containerd/config.toml
+      become: true 
+
+    - name: Ensure /etc/containerd/certs.d directory exists
+      ansible.builtin.file:
+        path: /etc/containerd/certs.d
+        state: directory
+        mode: '0755'
+
+    - name: Update SystemdCgroup to true in config.toml
+      ansible.builtin.lineinfile:
+        path: /etc/containerd/config.toml
+        regexp: '^\s*SystemdCgroup\s*=\s*false\s*$'
+        line: 'SystemdCgroup = true'
+
+    - name: Set config_path in config.toml
+      ansible.builtin.lineinfile:
+        path: /etc/containerd/config.toml
+        regexp: '^\s*config_path\s*=\s*""\s*$'
+        line: 'config_path="/etc/containerd/certs.d"'
+
+    - name: Start and Enable Containerd
+      ansible.builtin.systemd:
+        state: started
+        enabled: true
+        name: containerd
+
+    - name: Start and Enable kubadm
+      ansible.builtin.systemd:
+        state: started
+        enabled: true
+        name: kubelet
+
+    - name: Install dnsmasq on control panel
+      ansible.builtin.yum:
+        state: latest
+        name: dnsmasq
+      when: inventory_hostname == 'servera.example.com'
+
+    - name: Copy /etc/hosts to Servera
+      ansible.builtin.copy:
+        src: /etc/hosts
+        dest: /etc/hosts
+      when: inventory_hostname == 'servera.example.com'
+
+    - name: Copy /etc/hosts to Serverb, Serverc
+      ansible.builtin.copy:
+        src: /etc/hosts
+        dest: /etc/resolv.conf
+      when: inventory_hostname == 'serverb.example.com, serverc.example.com'
+
+    - name: Start and Enable dnsmasq
+      ansible.builtin.systemd:
+        state: started
+        enabled: true
+        name: dnsmasq
+      when: inventory_hostname == 'servera.example.com'
+

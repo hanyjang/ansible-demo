@@ -1,7 +1,8 @@
 # fact.yaml
 ---
 - name: Fact dump
-  hosts: all
+#  hosts: all
+  hosts: servera.example.com
   tasks:
     - name: Print all facts
       ansible.builtin.debug:

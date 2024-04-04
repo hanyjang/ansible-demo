@@ -1,0 +1,8 @@
+# delete_file.yaml
+- name: Set Context
+  hosts: seoul
+  tasks:
+    - name: delete file if it it's present
+      file:
+        dest: /etc/samba_file
+        state: absent
